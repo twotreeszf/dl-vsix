@@ -34,7 +34,7 @@ pip install -r requirements.txt
 Run the script and follow the prompts:
 
 ```bash
-python vsix_downloader.py
+python windsurf-vsix-tool.py
 ```
 
 The script will ask for:
