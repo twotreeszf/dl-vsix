@@ -5,6 +5,7 @@ import json
 import platform
 import sys
 import os
+import time
 from tqdm import tqdm
 import re
 
@@ -67,6 +68,19 @@ def get_extension_info(publisher, extension_id):
     response.raise_for_status()
     return response.json()
 
+class Extension:
+    """Represents a VS Code extension with its dependencies."""
+    def __init__(self, publisher, extension_id, version=None, download_url=None, dependencies=None):
+        self.publisher = publisher
+        self.extension_id = extension_id
+        self.version = version
+        self.download_url = download_url
+        self.dependencies = dependencies or []
+        self.key = f'{publisher}.{extension_id}'
+    
+    def __str__(self):
+        return self.key
+
 def get_extension_manifest(version):
     """Get the manifest content from extension version."""
     try:
@@ -115,58 +129,120 @@ def get_download_info(extension_info, target_platform):
     except (KeyError, IndexError) as e:
         raise ValueError(f'Failed to parse extension info: {str(e)}')
 
-def download_with_dependencies(url, publisher, extension_id, target_platform, downloaded=None):
-    """Download extension and its dependencies recursively."""
-    if downloaded is None:
-        downloaded = set()
+def build_dependency_tree(extension, target_platform, visited=None):
+    """Build a dependency tree for the extension."""
+    if visited is None:
+        visited = set()
     
-    # Skip if already downloaded
-    extension_key = f'{publisher}.{extension_id}'
-    if extension_key in downloaded:
-        print(f'Skipping {extension_key} (already downloaded)')
-        return
+    if extension.key in visited:
+        return extension
+    
+    visited.add(extension.key)
+    print(f'Querying extension: {extension.key}')
     
     # Get extension info
-    print(f'\nQuerying extension: {extension_key}')
-    extension_info = get_extension_info(publisher, extension_id)
+    extension_info = get_extension_info(extension.publisher, extension.extension_id)
     download_url, version, dependencies = get_download_info(extension_info, target_platform)
     
-    # Download current extension
-    output_path = download_extension(download_url, publisher, extension_id, version)
-    print(f'Extension downloaded successfully: {output_path}')
-    downloaded.add(extension_key)
+    # Update extension info
+    extension.version = version
+    extension.download_url = download_url
     
-    # Download dependencies
+    # Process dependencies
     if dependencies:
-        print(f'\nFound dependencies: {dependencies}')
+        print(f'Found dependencies: {dependencies}')
         for dep in dependencies:
             try:
                 dep_publisher, dep_id = dep.split('.')
-                download_with_dependencies(download_url, dep_publisher, dep_id, target_platform, downloaded)
+                dep_extension = Extension(dep_publisher, dep_id)
+                extension.dependencies.append(build_dependency_tree(dep_extension, target_platform, visited))
             except Exception as e:
-                print(f'Warning: Failed to download dependency {dep}: {str(e)}')
+                print(f'Warning: Failed to process dependency {dep}: {str(e)}')
+    
+    return extension
 
-def download_extension(url, publisher, extension_id, version, output_dir='.'):
-    """Download extension with progress bar."""
-    response = requests.get(url, stream=True)
-    response.raise_for_status()
+def get_download_order(extension, order=None, visited=None):
+    """Get the download order for extensions (dependencies first)."""
+    if order is None:
+        order = []
+    if visited is None:
+        visited = set()
     
-    # Generate filename using extension info
-    filename = f'{publisher}-{extension_id}-{version}.vsix'
+    if extension.key in visited:
+        return
+    
+    # Process dependencies first
+    for dep in extension.dependencies:
+        get_download_order(dep, order, visited)
+    
+    # Add current extension
+    if extension.key not in visited:
+        order.append(extension)
+        visited.add(extension.key)
+    
+    return order
+
+def download_with_retry(url, output_path, filename, max_retries=3):
+    """Download file with retry mechanism."""
+    for attempt in range(max_retries):
+        try:
+            response = requests.get(url, stream=True)
+            response.raise_for_status()
+            
+            total_size = int(response.headers.get('content-length', 0))
+            temp_path = output_path + '.tmp'
+            
+            with open(temp_path, 'wb') as f, tqdm(
+                desc=f'Downloading {filename}',
+                total=total_size,
+                unit='iB',
+                unit_scale=True
+            ) as pbar:
+                for chunk in response.iter_content(chunk_size=8192):
+                    size = f.write(chunk)
+                    pbar.update(size)
+            
+            # Verify file size
+            if os.path.getsize(temp_path) == total_size:
+                os.rename(temp_path, output_path)
+                return True
+            else:
+                print(f'Download incomplete, retrying ({attempt + 1}/{max_retries})')
+                continue
+                
+        except Exception as e:
+            if attempt < max_retries - 1:
+                print(f'Download failed: {str(e)}')
+                print(f'Retrying ({attempt + 1}/{max_retries})...')
+                time.sleep(1)  # Wait before retry
+            else:
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+                raise
+    
+    return False
+
+def download_extension(extension, index, total, output_dir='downloads'):
+    """Download extension with progress bar and retry mechanism."""
+    # Create output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Generate filename with order prefix
+    filename = f'{index:02d}-{extension.publisher}-{extension.extension_id}-{extension.version}.vsix'
     output_path = os.path.join(output_dir, filename)
-    total_size = int(response.headers.get('content-length', 0))
     
-    with open(output_path, 'wb') as f, tqdm(
-        desc=f'Downloading {filename}',
-        total=total_size,
-        unit='iB',
-        unit_scale=True
-    ) as pbar:
-        for chunk in response.iter_content(chunk_size=8192):
-            size = f.write(chunk)
-            pbar.update(size)
+    # Skip if already downloaded and size is correct
+    if os.path.exists(output_path):
+        print(f'Skipping {filename} (already exists)')
+        return output_path
     
-    return output_path
+    print(f'\nDownloading [{index}/{total}]: {extension.key}')
+    
+    # Download file with retry
+    if download_with_retry(extension.download_url, output_path, filename):
+        return output_path
+    else:
+        raise Exception('Download failed after all retries')
 
 def main():
     try:
@@ -178,21 +254,33 @@ def main():
         
         # Parse extension info
         publisher, extension_id = parse_extension_url(url)
+        extension = Extension(publisher, extension_id)
         
         # Get target platform
         target_platform = get_target_platform()
         print(f'Detected platform: {target_platform}')
         
+        # Build dependency tree
+        print('\nAnalyzing dependencies...')
+        root = build_dependency_tree(extension, target_platform)
+        
         if download_deps:
-            # Download extension and its dependencies
-            download_with_dependencies(url, publisher, extension_id, target_platform)
+            # Get download order (dependencies first)
+            download_list = get_download_order(root)
+            total = len(download_list)
+            print(f'\nFound {total} extension(s) to download')
+            
+            # Download all extensions in order
+            for i, ext in enumerate(download_list, 1):
+                try:
+                    output_path = download_extension(ext, i, total)
+                    print(f'Successfully downloaded: {output_path}')
+                except Exception as e:
+                    print(f'Error downloading {ext.key}: {str(e)}')
         else:
             # Download single extension
-            print(f'\nQuerying extension: {publisher}.{extension_id}')
-            extension_info = get_extension_info(publisher, extension_id)
-            download_url, version, _ = get_download_info(extension_info, target_platform)
-            output_path = download_extension(download_url, publisher, extension_id, version)
-            print(f'\nExtension downloaded successfully: {output_path}')
+            output_path = download_extension(root, 1, 1)
+            print(f'Successfully downloaded: {output_path}')
         
     except Exception as e:
         print(f'Error: {str(e)}')

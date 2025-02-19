@@ -11,6 +11,8 @@ A command-line tool to download VS Code extensions from the Visual Studio Market
 - Optional recursive dependency downloading
 - Avoids duplicate downloads
 - Generates organized filenames with publisher, extension ID and version
+- Robust download with automatic retry mechanism
+- File integrity verification
 
 ## Installation
 
@@ -43,15 +45,20 @@ Enter VS Marketplace URL: https://marketplace.visualstudio.com/items?itemName=pl
 Download dependencies? (y/N): y
 Detected platform: darwin-arm64
 
+Analyzing dependencies...
 Querying extension: platformio.platformio-ide
-Downloading platformio-platformio-ide-3.3.4.vsix...
-Extension downloaded successfully
-
 Found dependencies: ['ms-vscode.cpptools']
-
 Querying extension: ms-vscode.cpptools
-Downloading ms-vscode-cpptools-1.24.1.vsix...
-Extension downloaded successfully
+
+Found 2 extension(s) to download
+
+Downloading [1/2]: ms-vscode.cpptools
+Downloading 01-ms-vscode-cpptools-1.24.1.vsix: 100%|██████████| 77.9M/77.9M [00:19<00:00, 4.04MiB/s]
+Successfully downloaded: downloads/01-ms-vscode-cpptools-1.24.1.vsix
+
+Downloading [2/2]: platformio.platformio-ide
+Downloading 02-platformio-platformio-ide-3.3.4.vsix: 100%|██████████| 3.23M/3.23M [00:01<00:00, 2.65MiB/s]
+Successfully downloaded: downloads/02-platformio-platformio-ide-3.3.4.vsix
 ```
 
 ### Features
@@ -70,8 +77,12 @@ When enabled, automatically:
 - Prevents duplicate downloads
 
 #### Organized Output
-Downloaded files are named in a consistent format:
+Downloaded files are stored in the `downloads` subdirectory with a consistent naming format:
 ```
-{publisher}-{extension_id}-{version}.vsix
+{index}-{publisher}-{extension_id}-{version}.vsix
 ```
-Example: `ms-python-python-2024.0.1.vsix`
+Example: 
+- `01-ms-vscode-cpptools-1.24.1.vsix`
+- `02-platformio-platformio-ide-3.3.4.vsix`
+
+The numeric prefix indicates the installation order, ensuring dependencies are installed first.
