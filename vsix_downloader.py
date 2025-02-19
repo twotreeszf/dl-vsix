@@ -67,8 +67,26 @@ def get_extension_info(publisher, extension_id):
     response.raise_for_status()
     return response.json()
 
-def get_download_url(extension_info, target_platform):
-    """Extract download URL and version for specific platform from extension info."""
+def get_extension_manifest(version):
+    """Get the manifest content from extension version."""
+    try:
+        for file in version['files']:
+            if file['assetType'] == 'Microsoft.VisualStudio.Code.Manifest':
+                response = requests.get(file['source'])
+                response.raise_for_status()
+                return response.json()
+        return None
+    except Exception:
+        return None
+
+def get_extension_dependencies(manifest):
+    """Extract extension dependencies from manifest."""
+    if not manifest:
+        return []
+    return manifest.get('extensionDependencies', [])
+
+def get_download_info(extension_info, target_platform):
+    """Extract download URL, version and dependencies for specific platform from extension info."""
     try:
         result = extension_info['results'][0]
         extension = result['extensions'][0]
@@ -79,13 +97,54 @@ def get_download_url(extension_info, target_platform):
             target = version.get('targetPlatform', '')
             if target.lower() == target_platform.lower():
                 version_str = version.get('version')
+                download_url = None
+                
+                # Get manifest and VSIX package
+                manifest = get_extension_manifest(version)
+                dependencies = get_extension_dependencies(manifest)
+                
                 for file in version['files']:
                     if file['assetType'] == 'Microsoft.VisualStudio.Services.VSIXPackage':
-                        return file['source'], version_str
+                        download_url = file['source']
+                        break
+                
+                if download_url:
+                    return download_url, version_str, dependencies
                 
         raise ValueError(f'No package found for platform: {target_platform}')
     except (KeyError, IndexError) as e:
         raise ValueError(f'Failed to parse extension info: {str(e)}')
+
+def download_with_dependencies(url, publisher, extension_id, target_platform, downloaded=None):
+    """Download extension and its dependencies recursively."""
+    if downloaded is None:
+        downloaded = set()
+    
+    # Skip if already downloaded
+    extension_key = f'{publisher}.{extension_id}'
+    if extension_key in downloaded:
+        print(f'Skipping {extension_key} (already downloaded)')
+        return
+    
+    # Get extension info
+    print(f'\nQuerying extension: {extension_key}')
+    extension_info = get_extension_info(publisher, extension_id)
+    download_url, version, dependencies = get_download_info(extension_info, target_platform)
+    
+    # Download current extension
+    output_path = download_extension(download_url, publisher, extension_id, version)
+    print(f'Extension downloaded successfully: {output_path}')
+    downloaded.add(extension_key)
+    
+    # Download dependencies
+    if dependencies:
+        print(f'\nFound dependencies: {dependencies}')
+        for dep in dependencies:
+            try:
+                dep_publisher, dep_id = dep.split('.')
+                download_with_dependencies(download_url, dep_publisher, dep_id, target_platform, downloaded)
+            except Exception as e:
+                print(f'Warning: Failed to download dependency {dep}: {str(e)}')
 
 def download_extension(url, publisher, extension_id, version, output_dir='.'):
     """Download extension with progress bar."""
@@ -114,23 +173,26 @@ def main():
         # Get marketplace URL
         url = input('Enter VS Marketplace URL: ').strip()
         
+        # Ask about dependencies
+        download_deps = input('Download dependencies? (y/N): ').strip().lower() == 'y'
+        
         # Parse extension info
         publisher, extension_id = parse_extension_url(url)
-        print(f'\nQuerying extension: {publisher}.{extension_id}')
-        
-        # Get extension info
-        extension_info = get_extension_info(publisher, extension_id)
         
         # Get target platform
         target_platform = get_target_platform()
         print(f'Detected platform: {target_platform}')
         
-        # Get download URL and version
-        download_url, version = get_download_url(extension_info, target_platform)
-        
-        # Download extension
-        output_path = download_extension(download_url, publisher, extension_id, version)
-        print(f'\nExtension downloaded successfully: {output_path}')
+        if download_deps:
+            # Download extension and its dependencies
+            download_with_dependencies(url, publisher, extension_id, target_platform)
+        else:
+            # Download single extension
+            print(f'\nQuerying extension: {publisher}.{extension_id}')
+            extension_info = get_extension_info(publisher, extension_id)
+            download_url, version, _ = get_download_info(extension_info, target_platform)
+            output_path = download_extension(download_url, publisher, extension_id, version)
+            print(f'\nExtension downloaded successfully: {output_path}')
         
     except Exception as e:
         print(f'Error: {str(e)}')
