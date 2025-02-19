@@ -70,7 +70,7 @@ def get_extension_info(publisher, extension_id):
     return response.json()
 
 class Extension:
-    """Represents a VS Code extension with its dependencies."""
+    """Represents a VSCode extension with its dependencies."""
     def __init__(self, publisher, extension_id, version=None, download_url=None, dependencies=None):
         self.publisher = publisher
         self.extension_id = extension_id
