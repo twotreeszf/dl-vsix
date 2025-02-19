@@ -1,4 +1,4 @@
-# VSCode Extension Downloader
+# VSCode Extension Downloader & Installer for Windsurf
 
 A command-line tool to download VSCode extensions from the Visual Studio Marketplace.
 
