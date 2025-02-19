@@ -19,6 +19,7 @@ The development process was remarkably efficient - within an hour, we had a full
 - Generates organized filenames with publisher, extension ID and version
 - Robust download with automatic retry mechanism
 - File integrity verification
+- Optional automatic installation in Windsurf
 
 ## Installation
 
@@ -37,8 +38,9 @@ python vsix_downloader.py
 ```
 
 The script will ask for:
-1. A VS Code Marketplace URL
+1. A VSCode Marketplace URL
 2. Whether to download dependencies
+3. Whether to install the downloaded extensions in Windsurf
 
 Example marketplace URLs:
 - https://marketplace.visualstudio.com/items?itemName=ms-vscode.cpptools
@@ -65,6 +67,16 @@ Successfully downloaded: downloads/01-ms-vscode-cpptools-1.24.1.vsix
 Downloading [2/2]: platformio.platformio-ide
 Downloading 02-platformio-platformio-ide-3.3.4.vsix: 100%|██████████| 3.23M/3.23M [00:01<00:00, 2.65MiB/s]
 Successfully downloaded: downloads/02-platformio-platformio-ide-3.3.4.vsix
+
+Install extensions in Windsurf? (y/N): y
+
+Installing extensions in Windsurf...
+Installing 01-ms-vscode-cpptools-1.24.1.vsix...
+Successfully installed
+Installing 02-platformio-platformio-ide-3.3.4.vsix...
+Successfully installed
+
+All extensions installed successfully!
 ```
 
 ### Features

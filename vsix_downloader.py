@@ -6,6 +6,7 @@ import platform
 import sys
 import os
 import time
+import subprocess
 from tqdm import tqdm
 import re
 
@@ -244,6 +245,32 @@ def download_extension(extension, index, total, output_dir='downloads'):
     else:
         raise Exception('Download failed after all retries')
 
+def install_extensions(downloaded_files):
+    """Install downloaded extensions in Windsurf."""
+    windsurf_cli = '/Applications/Windsurf.app/Contents/Resources/app/bin/windsurf'
+    
+    if not os.path.exists(windsurf_cli):
+        print('Windsurf not found. Please make sure it is installed in /Applications')
+        return False
+    
+    print('\nInstalling extensions in Windsurf...')
+    for file in downloaded_files:
+        print(f'Installing {os.path.basename(file)}...')
+        try:
+            result = subprocess.run(
+                [windsurf_cli, '--install-extension', file],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            print('Successfully installed')
+        except subprocess.CalledProcessError as e:
+            print(f'Failed to install: {e.stderr}')
+            return False
+    
+    print('\nAll extensions installed successfully!')
+    return True
+
 def main():
     try:
         # Get marketplace URL
@@ -264,6 +291,7 @@ def main():
         print('\nAnalyzing dependencies...')
         root = build_dependency_tree(extension, target_platform)
         
+        downloaded_files = []
         if download_deps:
             # Get download order (dependencies first)
             download_list = get_download_order(root)
@@ -274,13 +302,21 @@ def main():
             for i, ext in enumerate(download_list, 1):
                 try:
                     output_path = download_extension(ext, i, total)
+                    downloaded_files.append(output_path)
                     print(f'Successfully downloaded: {output_path}')
                 except Exception as e:
                     print(f'Error downloading {ext.key}: {str(e)}')
         else:
             # Download single extension
             output_path = download_extension(root, 1, 1)
+            downloaded_files.append(output_path)
             print(f'Successfully downloaded: {output_path}')
+        
+        # Ask to install in Windsurf
+        if downloaded_files:
+            install = input('\nInstall extensions in Windsurf? (y/N): ').strip().lower() == 'y'
+            if install:
+                install_extensions(downloaded_files)
         
     except Exception as e:
         print(f'Error: {str(e)}')
